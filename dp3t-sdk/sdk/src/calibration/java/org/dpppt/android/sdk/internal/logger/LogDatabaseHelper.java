@@ -7,18 +7,13 @@
  *
  * SPDX-License-Identifier: MPL-2.0
  */
-
 package org.dpppt.android.sdk.internal.logger;
 
-import android.content.Context;
 import android.database.sqlite.SQLiteDatabase;
-
-import org.dpppt.android.sdk.internal.database.DatabaseHelper;
 
 public class LogDatabaseHelper {
 
-	public static void copyLogDatabase(Context context) {
-		SQLiteDatabase database = DatabaseHelper.getWritableDatabase(context);
+	public static void copyLogDatabase(SQLiteDatabase database) {
 		database.beginTransaction();
 		database.execSQL("drop table if exists " + LogDatabase.LogSpec.TABLE_NAME);
 		LogDatabase.LogDatabaseHelper.executeCreate(database);

@@ -10,9 +10,9 @@ DP-3T is a free-standing effort started at EPFL and ETHZ that produced this prot
 
 
 ## Introduction
-This is the first implementation of the DP-3T "low bandwidth" protocol. The current implementation does not use the as yet unreleased "Contact Tracing" API of Apple/Google--**and has limitations as a result**. Our "hybrid approach" uses Bluetooth Low Energy (BLE) to exchange `EphID`s. It uses advertisements whenever possible and falls back to GATT Server connections if not possible to transmit/collect an `EphID` this way (e.g., on iOS devices when the app is in background). This approach can result in higher energy consumption and scalability issues and will be replaced by the Apple/Google API.
+This is the implementation of the DP-3T protocol using the [Exposure Notification](https://www.google.com/covid19/exposurenotifications/) Framework of Apple/Google. Only approved government public health authorities can access the APIs. Therefore, using this SDK will result in an API error unless either your account is whitelisted as test account or your app is approved by Google and signed with the production certificate.
 
-Our immediate roadmap is: to support the Apple/Google wire protocol, to be forward-compatible, and to support the actual Apple/Google API as soon as it is released to iOS and Android devices.
+Our prestandard solution that is not using the Apple/Google framework can be found under the [tag prestandard](https://github.com/DP-3T/dp3t-sdk-android/tree/prestandard).
 
 ## Repositories
 * Android SDK & Calibration app: [dp3t-sdk-android](https://github.com/DP-3T/dp3t-sdk-android)
@@ -21,15 +21,8 @@ Our immediate roadmap is: to support the Apple/Google wire protocol, to be forwa
 * iOS Demo App: [dp3t-app-ios](https://github.com/DP-3T/dp3t-app-ios)
 * Backend SDK: [dp3t-sdk-backend](https://github.com/DP-3T/dp3t-sdk-backend)
 
-## Work in Progress
-The DP3T-SDK for Android contains alpha-quality code only and is not yet complete. It has not yet been reviewed or audited for security and compatibility. We are both continuing the development and have started a security review. This project is truly open-source and we welcome any feedback on the code regarding both the implementation and security aspects.
-This repository contains the open prototype SDK, so please focus your feedback for this repository on implementation issues.
-
 ## Further Documentation
 The full set of documents for DP3T is at https://github.com/DP-3T/documents. Please refer to the technical documents and whitepapers for a description of the implementation.
-
-## Architecture
-A central discovery service is hosted on [Github](https://github.com/DP-3T/dp3t-discovery). This server provides the necessary information for the SDK to initialize itself. After the SDK loads the base url for its own backend, it will load the infected list from there, as well as post if a user is infected. This will also allow apps to fetch lists from other backend systems participating in this scheme and can handle roaming of users.
 
 ## Calibration App
 Included in this repository is a Calibration App that can run, debug and test the SDK directly without implementing it in a new app first. It collects additional data and stores it locally into a database to allow for tests with phones from different vendors. Various parameters of the SDK are exposed and can be changed at runtime. Additionally it provides an overview of how to use the SDK.
@@ -45,16 +38,16 @@ Included in this repository is a Calibration App that can run, debug and test th
 ### Initialization
 Name | Description | Function Name
 ---- | ----------- | -------------
-initWithAppId | Initializes the SDK and configures it |  `public static void init(Context context, String appId)`
+init | Initializes the SDK and configures it |  `public static void init(Context context, ApplicationInfo applicationInfo, PublicKey signaturePublicKey)`
 
 ### Methods 
 Name | Description | Function Name
 ---- | ----------- | -------------
-start | Starts Bluetooth tracing | `public static void start(Context context)`
-stop | Stops Bluetooth tracing | `public static void stop(Context context)`
+start | Asks the user to enable ExposureNotifications and starts tracing if accepted | `public static void start(Activity activity, Runnable successCallback, Consumer<Exception> errorCallback, Runnable cancelledCallback)`
+stop | Stops tracing | `public static void stop(Context context)`
 sync | Pro-actively triggers sync with backend to refresh exposed list | `public static void sync(Context context)`
-status | Returns a TracingStatus-Object describing the current state. This contains:<br/>- `numberOfContacts` : `int` <br /> - `advertising` : `boolean` <br /> - `receiving` : `boolean` <br /> - `lastSyncUpdate`:`long` <br />- `infectionStatus`:`InfectionStatus` <br />- `matchedContacts`:`List<MatchedContact>` <br /> - `errors` (permission, bluetooth disabled, no network, ...) : `List<ErrorState>` | `public static TracingStatus getStatus(Context context)`
-I infected | This method must be called upon positive test. | `public static void sendIAmInfected(Context context, Date onset, ExposeeAuthData exposeeAuthData, CallbackListener<Void> callback)`
+status | Returns a TracingStatus-Object describing the current state. This contains:<br/> - `tracingEnabled` : `boolean` <br /> - `lastSyncDate`:`long` <br />- `infectionStatus`:`InfectionStatus` <br />- `exposureDays`:`List<ExposureDay>` <br /> - `errors` (permission, bluetooth disabled, no network, ...) : `List<ErrorState>` | `public static TracingStatus getStatus(Context context)`
+I infected | This method must be called upon positive test. | `public static void sendIAmInfected(Activity activity, Date onset, ExposeeAuthMethod exposeeAuthMethod, ResponseCallback<Void> callback)`
 clearData | Removes all SDK related data (key and database) and de-initializes SDK | `public static void clearData(Context context, Runnable onDeleteListener)`
 
 ### Broadcast
@@ -74,7 +67,7 @@ The library is generated under sdk/build/outputs/aar
 The SDK is available on JCenter and can be included directly as Gradle dependency:
 ```groovy
 dependencies {
-implementation 'org.dpppt:dp3t-sdk-android:0.1.0'
+implementation 'org.dpppt:dp3t-sdk-android:1.0.0'
 }
 ```
 
@@ -83,17 +76,17 @@ implementation 'org.dpppt:dp3t-sdk-android:0.1.0'
 ### Initialization
 In your Application.onCreate() you have to initialize the SDK with:
 ```java
-DP3T.init(getContext(), "com.example.your.app");
+DP3T.init(getContext(), applicationInfo, signaturePublicKey);
 ```
-The provided app name has to be registered in the discovery service on [Github](https://github.com/DP-3T/dp3t-discovery/blob/master/discovery.json)
+The ApplicationInfo defines the id of your app as well as the urls for reporting and loading TEKs.
 
 ### Start / Stop tracing
 To start and stop tracing use
 ```java
-DP3T.start(getContext());
+DP3T.start(activity, successCallback, errorCallback, cancelledCallback);
 DP3T.stop(getContext());
 ```
-Make sure that the user has the permission Manifest.permission.ACCESS_FINE_LOCATION granted (this coarse-grained permission is required for any app with Bluetooth activity; our SDK uses BLE beaconing but does not require any "location" data), Bluetooth is enabled and BatteryOptimization is disabled. BatteryOptimization can be checked with
+To make sure the background jobs run with low delays, make sure the user disables BatteryOptimization. BatteryOptimization can be checked with
 ```java
 PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
 boolean batteryOptDeact = powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName());
@@ -106,14 +99,27 @@ startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
 
 Tracing is automatically restarted if the phone is rebooted by the SDK, it is enough to call `start()` once from your app.
 
-### Customize tracing notification
-The tracing happens in a foreground service and therefore displays a notification. This notification can be customized by defining the following string resources in your project:
+### Customize error notifications
+The SDK generates notifications for several error cases. These notifications can be customized by defining the following string resources in your project:
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="dp3t_sdk_service_notification_channel">@string/app_name</string>
-	<string name="dp3t_">@string/app_name</string>
-	<string name="dp3t_sdk_service_notification_text">@string/foreground_service_notification_text</string>
+	<string name="dp3t_sdk_service_notification_channel">DP3T SDK</string>
+	<string name="dp3t_sdk_service_notification_title">DP3T SDK</string>
+	<string name="dp3t_sdk_service_notification_errors">App can\'t function properly:</string>
+	<string name="dp3t_sdk_service_notification_error_location_service">location service disabled</string>
+	<string name="dp3t_sdk_service_notification_error_bluetooth_disabled">bluetooth is disabled</string>
+	<string name="dp3t_sdk_service_notification_error_bluetooth_not_supported">bluetooth low-energy is not supported on this device</string>
+	<string name="dp3t_sdk_service_notification_error_sync_server">failed to load new infection data (server error)</string>
+	<string name="dp3t_sdk_service_notification_error_sync_network">failed to load new infection data (network error)</string>
+	<string name="dp3t_sdk_service_notification_error_no_space">failed to load new infection data (no space on device)</string>
+	<string name="dp3t_sdk_service_notification_error_sync_ssltls">failed to load new infection data (ssl/tls error)</string>
+	<string name="dp3t_sdk_service_notification_error_sync_timing">device time does not match server time</string>
+	<string name="dp3t_sdk_service_notification_error_sync_signature">failed to load new infection data (invalid signature)</string>
+	<string name="dp3t_sdk_service_notification_error_sync_api">failed to load new infection data</string>
+	<string name="dp3t_sdk_service_notification_error_gaen_not_available">google exposure notifications are not available on this device</string>
+	<string name="dp3t_sdk_service_notification_error_gaen_unexpectedly_disabled">google exposure notifications disabled, but was expected to be active</string>
+	<string name="dp3t_sdk_service_notification_error_battery_optimization">battery optimization enabled</string>
 </resources>
 ```
 To change the notification icon add your custom ic_handshakes drawable to the project.
@@ -129,9 +135,9 @@ To get notified when the status changes, you can register a broadcast receiver w
 getContext().registerReceiver(broadcastReceiver, DP3T.getUpdateIntentFilter());
 ```
 
-### Report user exposed
+### Report user infected
 ```java
-DP3T.sendIWasExposed(getContext(), null, new CallbackListener<Void>() {
+DP3T.sendIAmInfected(activity, onsetDate, exposeeAuthMethod, new ResponseCallback<Void> callback){
 				@Override
 				public void onSuccess(Void response) {
 				}
@@ -142,12 +148,13 @@ DP3T.sendIWasExposed(getContext(), null, new CallbackListener<Void>() {
 			});
 ```
 
-### Sync with backend for exposed users
+### Sync with backend for infected users
 The SDK automatically registers a periodic Job to sync with the backend for new exposed users. If you want to trigger a sync manually (e.g., upon a push from your backend) you can use:
 ```java
 DP3T.sync(getContext());
 ```
 Make sure you do not call this method on the UI thread, because it will perform the sync synchronously.
+Due to rate limits on the provideDiagnosisKeys() the sync can be execute only in a very restricted manner.
 
 ## License
 This project is licensed under the terms of the MPL 2 license. See the [LICENSE](LICENSE) file.

@@ -7,18 +7,18 @@
  *
  * SPDX-License-Identifier: MPL-2.0
  */
-
 package org.dpppt.android.sdk;
 
 import android.content.Context;
+import android.database.sqlite.SQLiteDatabase;
+import androidx.core.util.Consumer;
 
 import java.io.OutputStream;
 
 import org.dpppt.android.sdk.internal.AppConfigManager;
-import org.dpppt.android.sdk.internal.crypto.CryptoDatabaseHelper;
-import org.dpppt.android.sdk.internal.database.Database;
+import org.dpppt.android.sdk.internal.export.ExportDatabaseOpenHelper;
+import org.dpppt.android.sdk.internal.export.DeviceHelper;
 import org.dpppt.android.sdk.internal.logger.LogDatabaseHelper;
-import org.dpppt.android.sdk.util.DeviceHelper;
 
 public class DP3TCalibrationHelper {
 
@@ -34,18 +34,15 @@ public class DP3TCalibrationHelper {
 		AppConfigManager.getInstance(context).setCalibrationTestDeviceName(null);
 	}
 
-	public static void exportDb(Context context, OutputStream targetOut, Runnable onExportedListener) {
+	public static void exportDatabase(Context context, OutputStream targetOut, Runnable successCallback,
+			Consumer<Exception> errorCallback) {
 		new Thread(() -> {
-			CryptoDatabaseHelper.copySKsToDatabase(context);
-			LogDatabaseHelper.copyLogDatabase(context);
-			DeviceHelper.addDeviceInfoToDatabase(context);
-			Database db = new Database(context);
-			db.exportTo(context, targetOut, response -> onExportedListener.run());
+			ExportDatabaseOpenHelper dbOpenHelper = ExportDatabaseOpenHelper.getInstance(context);
+			SQLiteDatabase database = dbOpenHelper.getWritableDatabase();
+			LogDatabaseHelper.copyLogDatabase(database);
+			DeviceHelper.addDeviceInfoToDatabase(database, context);
+			dbOpenHelper.exportDatabaseTo(context, targetOut, successCallback, errorCallback);
 		}).start();
-	}
-
-	public static void start(Context context, boolean advertise, boolean receive) {
-		DP3T.start(context, advertise, receive);
 	}
 
 }

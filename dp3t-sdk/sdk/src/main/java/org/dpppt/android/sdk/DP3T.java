@@ -38,6 +38,10 @@ import org.dpppt.android.sdk.internal.logger.Logger;
 import org.dpppt.android.sdk.internal.nearby.GaenStateCache;
 import org.dpppt.android.sdk.internal.nearby.GaenStateHelper;
 import org.dpppt.android.sdk.internal.nearby.GoogleExposureClient;
+import org.dpppt.android.sdk.internal.storage.ErrorNotificationStorage;
+import org.dpppt.android.sdk.internal.storage.ExposureDayStorage;
+import org.dpppt.android.sdk.internal.storage.PendingKeyUploadStorage;
+import org.dpppt.android.sdk.internal.storage.models.PendingKey;
 import org.dpppt.android.sdk.models.ApplicationInfo;
 import org.dpppt.android.sdk.models.DayDate;
 import org.dpppt.android.sdk.models.ExposeeAuthMethod;
@@ -81,12 +85,12 @@ public class DP3T {
 		googleExposureClient
 				.setParams(appConfigManager.getAttenuationThresholdLow(), appConfigManager.getAttenuationThresholdMedium());
 
-		executeInit(context.getApplicationContext());
+		executeInit(context.getApplicationContext(), appConfigManager);
 
 		initialized = true;
 	}
 
-	private static void executeInit(Context context) {
+	private static void executeInit(Context context, AppConfigManager appConfigManager) {
 		if (initialized) {
 			return;
 		}
@@ -110,6 +114,11 @@ public class DP3T {
 
 		GaenStateHelper.invalidateGaenAvailability(context);
 		GaenStateHelper.invalidateGaenEnabled(context);
+
+		if (appConfigManager.isTracingEnabled()) {
+			SyncWorker.startSyncWorker(context);
+			BroadcastHelper.sendUpdateAndErrorBroadcast(context);
+		}
 	}
 
 	public static boolean isInitialized() {
@@ -255,11 +264,7 @@ public class DP3T {
 												new ResponseCallback<String>() {
 													@Override
 													public void onSuccess(String authToken) {
-														PendingKeyUploadStorage.PendingKey delayedKey =
-																new PendingKeyUploadStorage.PendingKey(
-																		delayedKeyDate,
-																		authToken,
-																		0);
+														PendingKey delayedKey = new PendingKey(delayedKeyDate, authToken, 0);
 														PendingKeyUploadStorage.getInstance(activity).addPendingKey(delayedKey);
 														appConfigManager.setIAmInfected(true);
 														pendingIAmInfectedRequest.callback.onSuccess(null);
@@ -288,7 +293,8 @@ public class DP3T {
 		pendingIAmInfectedRequest = null;
 	}
 
-	public static void sendFakeInfectedRequest(Context context, ExposeeAuthMethod exposeeAuthMethod) {
+	public static void sendFakeInfectedRequest(Context context, ExposeeAuthMethod exposeeAuthMethod, Runnable successCallback,
+			Runnable errorCallback) {
 		checkInit();
 
 		int delayedKeyDate = DateUtil.getCurrentRollingStartNumber();
@@ -303,10 +309,7 @@ public class DP3T {
 							new ResponseCallback<String>() {
 								@Override
 								public void onSuccess(String authToken) {
-									PendingKeyUploadStorage.PendingKey delayedKey = new PendingKeyUploadStorage.PendingKey(
-											delayedKeyDate,
-											authToken,
-											1);
+									PendingKey delayedKey = new PendingKey(delayedKeyDate, authToken, 1);
 									PendingKeyUploadStorage.getInstance(context).addPendingKey(delayedKey);
 									Logger.d(TAG, "successfully sent fake request");
 									if (devHistory) {
@@ -314,6 +317,7 @@ public class DP3T {
 										historyDatabase.addEntry(new HistoryEntry(HistoryEntryType.FAKE_REQUEST, null, true,
 												System.currentTimeMillis()));
 									}
+									if (successCallback != null) successCallback.run();
 								}
 
 								@Override
@@ -326,6 +330,7 @@ public class DP3T {
 										historyDatabase.addEntry(new HistoryEntry(HistoryEntryType.FAKE_REQUEST, status, false,
 												System.currentTimeMillis()));
 									}
+									if (errorCallback != null) errorCallback.run();
 								}
 							});
 		} catch (IllegalStateException e) {
@@ -335,6 +340,7 @@ public class DP3T {
 				historyDatabase.addEntry(new HistoryEntry(HistoryEntryType.FAKE_REQUEST, "SYST", false,
 						System.currentTimeMillis()));
 			}
+			if (errorCallback != null) errorCallback.run();
 		}
 	}
 
@@ -384,8 +390,12 @@ public class DP3T {
 		return userAgent;
 	}
 
-	public static void setNetworkErrorGracePeriod(long gracePeriodMillis) {
-		SyncErrorState.getInstance().setNetworkErrorGracePeriod(gracePeriodMillis);
+	public static void setSyncErrorGracePeriod(long gracePeriodMillis) {
+		SyncErrorState.getInstance().setSyncErrorGracePeriod(gracePeriodMillis);
+	}
+
+	public static void setErrorNotificationGracePeriod(long gracePeriodMillis) {
+		SyncErrorState.getInstance().setErrorNotificationGracePeriod(gracePeriodMillis);
 	}
 
 	public static IntentFilter getUpdateIntentFilter() {
@@ -397,8 +407,7 @@ public class DP3T {
 		checkInit();
 
 		AppConfigManager appConfigManager = AppConfigManager.getInstance(context);
-		appConfigManager.setAttenuationThresholdLow(attenuationThresholdLow);
-		appConfigManager.setAttenuationThresholdMedium(attenuationThresholdMedium);
+		appConfigManager.setAttenuationThresholds(attenuationThresholdLow, attenuationThresholdMedium);
 		appConfigManager.setAttenuationFactorLow(attenuationFactorLow);
 		appConfigManager.setAttenuationFactorMedium(attenuationFactorMedium);
 		appConfigManager.setMinDurationForExposure(minDurationForExposure);
@@ -414,6 +423,7 @@ public class DP3T {
 		appConfigManager.clearPreferences();
 		ExposureDayStorage.getInstance(context).clear();
 		PendingKeyUploadStorage.getInstance(context).clear();
+		ErrorNotificationStorage.getInstance(context).clear();
 		Logger.clear();
 	}
 

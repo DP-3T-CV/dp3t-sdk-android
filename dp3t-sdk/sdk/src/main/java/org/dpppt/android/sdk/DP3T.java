@@ -99,10 +99,12 @@ public class DP3T {
 				new BluetoothStateBroadcastReceiver(),
 				new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
 		);
-		context.registerReceiver(
-				new LocationServiceBroadcastReceiver(),
-				new IntentFilter(LocationManager.MODE_CHANGED_ACTION)
-		);
+		if (!ErrorHelper.deviceSupportsLocationlessScanning(context)) {
+			context.registerReceiver(
+					new LocationServiceBroadcastReceiver(),
+					new IntentFilter(LocationManager.MODE_CHANGED_ACTION)
+			);
+		}
 		context.registerReceiver(
 				new BatteryOptimizationBroadcastReceiver(),
 				new IntentFilter(BatteryOptimizationBroadcastReceiver.ACTION_POWER_SAVE_WHITELIST_CHANGED)
@@ -205,6 +207,7 @@ public class DP3T {
 
 	public static TracingStatus getStatus(Context context) {
 		checkInit();
+		GaenStateHelper.invalidateGaenEnabled(context);
 		AppConfigManager appConfigManager = AppConfigManager.getInstance(context);
 		Collection<TracingStatus.ErrorState> errorStates = ErrorHelper.checkTracingErrorStatus(context, appConfigManager);
 		InfectionStatus infectionStatus;
@@ -248,25 +251,38 @@ public class DP3T {
 				.getTemporaryExposureKeyHistory(activity, REQUEST_CODE_EXPORT_KEYS,
 						temporaryExposureKeys -> {
 							List<TemporaryExposureKey> filteredKeys = new ArrayList<>();
+							int delayedKeyDate = DateUtil.getCurrentRollingStartNumber();
+							boolean delayedKeyAlreadyPresent = false;
 							for (TemporaryExposureKey temporaryExposureKey : temporaryExposureKeys) {
 								if (temporaryExposureKey.getRollingStartIntervalNumber() >=
 										DateUtil.getRollingStartNumberForDate(onsetDate)) {
 									filteredKeys.add(temporaryExposureKey);
+									if (temporaryExposureKey.getRollingStartIntervalNumber() == delayedKeyDate) {
+										delayedKeyAlreadyPresent = true;
+									}
 								}
 							}
-							int delayedKeyDate = DateUtil.getCurrentRollingStartNumber();
 							GaenRequest exposeeListRequest = new GaenRequest(filteredKeys, delayedKeyDate);
 
 							AppConfigManager appConfigManager = AppConfigManager.getInstance(activity);
 							try {
+								boolean finalDelayedKeyAlreadyPresent = delayedKeyAlreadyPresent;
 								appConfigManager.getBackendReportRepository(activity)
 										.addGaenExposee(exposeeListRequest, pendingIAmInfectedRequest.exposeeAuthMethod,
 												new ResponseCallback<String>() {
 													@Override
 													public void onSuccess(String authToken) {
-														PendingKey delayedKey = new PendingKey(delayedKeyDate, authToken, 0);
+														//if the currentDay key was already released (because of same day TEK
+														// release) we do a fake request the next day, otherwise we upload todays
+														// key tomorrow
+														PendingKey delayedKey = new PendingKey(delayedKeyDate, authToken,
+																finalDelayedKeyAlreadyPresent ? 1 : 0);
 														PendingKeyUploadStorage.getInstance(activity).addPendingKey(delayedKey);
 														appConfigManager.setIAmInfected(true);
+														if (finalDelayedKeyAlreadyPresent) {
+															DP3T.stop(activity);
+															appConfigManager.setIAmInfectedIsResettable(true);
+														}
 														pendingIAmInfectedRequest.callback.onSuccess(null);
 														pendingIAmInfectedRequest = null;
 													}

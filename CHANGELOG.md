@@ -1,5 +1,18 @@
 # Changelog for DP3T-SDK Android
 
+## version 1.0.5 (24.9.2020)
+
+- support location less scanning on Android 11
+- fix state update bug when EN are activated/deactivated outside of the app
+- update targetSdk to 30, use gradle 6.6.1 and Android-Plugin 4.0.1
+- fix https://github.com/DP-3T/dp3t-sdk-android/issues/206
+
+## version 1.0.4 (25.8.2020)
+
+- exposed days are now deleted 14 days after reporting the exposureDay (before they were deleted 10 days after the exposure which could be only 1 day after reporting)
+- handle same day release of TEK: if we receive the current days TEK directly, we do a fake request the next day. Otherwise, the current days TEK is uploaded the next day as before.
+- the number of uploaded keys has been increased to 30, because with same day release of keys it is possible to have more than 14 TEKs for the past 14 days
+
 ## version 1.0.3 (24.7.2020)
 
 - upgraded to play-services-nearby-18.0.3-eap (adds a service for Google to restart our application after force stop starting v1.5)
